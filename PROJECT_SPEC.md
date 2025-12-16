@@ -3,12 +3,15 @@
 ## 📋 项目概述
 
 ### 项目名称
+
 Document Reader MCP Server
 
 ### 项目描述
+
 一个基于FastMCP的文档读取服务器,为大语言模型提供统一的文档读取能力。支持PDF、Excel(XLS/XLSX/ODS)、Word(DOC/DOCX)等常见文档格式的智能解析和内容提取。
 
 ### 核心特性
+
 - **统一接口**: 单一工具调用,自动识别文档类型
 - **智能路由**: 根据文件扩展名自动选择最佳处理器
 - **多格式支持**: PDF、XLS、XLSX、ODS、DOC、DOCX
@@ -24,21 +27,24 @@ Document Reader MCP Server
 ## 🎯 技术栈
 
 ### 核心框架
+
 - **Python**: 3.10+
 - **FastMCP**: 最新版本 (MCP Python SDK)
 - **Pydantic**: 2.0+ (数据验证)
 
 ### 文档处理库
-| 文档格式 | 主要库 | 备选库 | 用途 |
-|---------|--------|--------|------|
-| PDF | `pdfplumber` | `PyPDF2` | 文本提取、表格识别 |
-| XLSX | `openpyxl` | - | Excel 2007+格式 |
-| XLS | `xlrd` | - | Excel 97-2003格式 |
-| ODS | `odfpy` | - | OpenDocument表格 |
-| DOCX | `python-docx` | - | Word 2007+格式 |
-| DOC | `antiword` + `subprocess` | `textract` | Word 97-2003格式 |
+
+| 文档格式 | 主要库                        | 备选库       | 用途               |
+| -------- | ----------------------------- | ------------ | ------------------ |
+| PDF      | `pdfplumber`                | `PyPDF2`   | 文本提取、表格识别 |
+| XLSX     | `openpyxl`                  | -            | Excel 2007+格式    |
+| XLS      | `xlrd`                      | -            | Excel 97-2003格式  |
+| ODS      | `odfpy`                     | -            | OpenDocument表格   |
+| DOCX     | `python-docx`               | -            | Word 2007+格式     |
+| DOC      | `antiword` + `subprocess` | `textract` | Word 97-2003格式   |
 
 ### 开发工具
+
 - **包管理器**: UV
 - **虚拟环境**: Python venv
 - **代码规范**: Type hints, Pydantic validation
@@ -85,6 +91,7 @@ Document-Reader/
 ### 1. 统一工具接口: `read_document`
 
 #### 工具定义
+
 ```python
 @mcp.tool(
     name="read_document",
@@ -101,6 +108,7 @@ async def read_document(params: ReadDocumentInput) -> str:
 ```
 
 #### 输入参数模型
+
 ```python
 class ReadDocumentInput(BaseModel):
     # 必需参数
@@ -127,6 +135,7 @@ class ReadDocumentInput(BaseModel):
 #### 输出格式
 
 **Markdown格式示例**:
+
 ```markdown
 # 文档: report.pdf
 
@@ -152,6 +161,7 @@ class ReadDocumentInput(BaseModel):
 ```
 
 **JSON格式示例**:
+
 ```json
 {
   "file_name": "report.pdf",
@@ -183,6 +193,7 @@ class ReadDocumentInput(BaseModel):
 ```
 
 **Excel小表格输出示例** (≤50行,Markdown格式):
+
 ```markdown
 # Excel文档: sales.xlsx
 
@@ -202,6 +213,7 @@ class ReadDocumentInput(BaseModel):
 ```
 
 **Excel大表格输出示例** (>50行,CSV格式):
+
 ```markdown
 # Excel文档: large_data.xlsx
 
@@ -220,6 +232,7 @@ class ReadDocumentInput(BaseModel):
 2024-01-01,产品B,家居,5,149.99,0.05,7.12,719.07
 ...
 ```
+
 ```
 
 **Excel预览模式输出示例** (preview_mode=true):
@@ -250,6 +263,7 @@ class ReadDocumentInput(BaseModel):
 ### 2. 文档处理器架构
 
 #### 基类: DocumentProcessor
+
 ```python
 from abc import ABC, abstractmethod
 from typing import Dict, Any
@@ -284,6 +298,7 @@ class DocumentProcessor(ABC):
 ```
 
 #### Excel处理器: ExcelProcessor
+
 ```python
 class ExcelProcessor(DocumentProcessor):
     """Excel文档处理器 - 支持XLS/XLSX/ODS
@@ -318,6 +333,7 @@ class ExcelProcessor(DocumentProcessor):
 ```
 
 #### Word处理器: WordProcessor
+
 ```python
 class WordProcessor(DocumentProcessor):
     """Word文档处理器 - 支持DOC/DOCX"""
@@ -338,6 +354,7 @@ class WordProcessor(DocumentProcessor):
 ```
 
 #### PDF处理器: PdfProcessor
+
 ```python
 class PdfProcessor(DocumentProcessor):
     """PDF文档处理器 - 使用pdfplumber"""
@@ -475,6 +492,7 @@ def format_file_size(size_bytes: int) -> str:
 ### 6. Excel智能格式转换详解
 
 #### 转换决策流程
+
 ```python
 def determine_excel_output_format(row_count: int, preview_mode: bool, max_rows: Optional[int]) -> str:
     """
@@ -503,6 +521,7 @@ def determine_excel_output_format(row_count: int, preview_mode: bool, max_rows: 
 #### 格式转换示例
 
 **场景1: 小表格(25行)**
+
 ```python
 # 输入
 params = {
@@ -518,6 +537,7 @@ format = "markdown_table"  # 25 ≤ 50
 ```
 
 **场景2: 大表格(500行)**
+
 ```python
 # 输入
 params = {
@@ -532,6 +552,7 @@ format = "csv"  # 500 > 50
 ```
 
 **场景3: 预览模式(实际5000行)**
+
 ```python
 # 输入
 params = {
@@ -548,6 +569,7 @@ format = "markdown_table"  # 预览模式固定Markdown
 ```
 
 **场景4: 自定义限制(实际1000行,限制100行)**
+
 ```python
 # 输入
 params = {
@@ -566,13 +588,15 @@ format = "csv"     # 100 > 50
 #### 图片处理策略
 
 **所有文档格式统一处理**:
+
 1. PDF中的图片 -> `[image]`
 2. Word中的图片 -> `[image]`
 3. Excel中的图片 -> `[image]`
 
 **实现方式**:
+
 - 检测到图片对象时,不尝试提取或编码
-- 在文本流中插入`[image]`标记
+- 在文本流中插入 `[image]`标记
 - 可选:在元数据中记录图片数量和位置
 
 ---
@@ -580,16 +604,19 @@ format = "csv"     # 100 > 50
 ## 🔒 安全和限制
 
 ### 文件大小限制
+
 - **最大文件大小**: 50MB
 - **原因**: 防止内存溢出,保证响应速度
 - **检查时机**: 文件验证阶段
 
 ### 文件路径限制
+
 - **仅支持绝对路径**: 明确文件位置
 - **不支持网络URL**: 仅本地文件访问
 - **不限制路径范围**: 用户自行管理文件权限
 
 ### Excel处理策略
+
 - **智能格式转换**:
   - 行数 ≤ 50: 转换为Markdown表格(易读,适合LLM理解)
   - 行数 > 50: 转换为CSV格式(紧凑,节省token)
@@ -608,18 +635,19 @@ format = "csv"     # 100 > 50
 
 ### 错误类型和消息
 
-| 错误类型 | 错误消息模板 | HTTP状态码等效 |
-|---------|-------------|---------------|
-| 文件不存在 | `错误: 文件未找到 '{file_path}'。请检查路径是否正确。` | 404 |
-| 文件过大 | `错误: 文件大小 {size}MB 超过限制 50MB。请使用较小的文件。` | 413 |
-| 格式不支持 | `错误: 不支持的文件格式 '.{ext}'。支持的格式: .pdf, .xls, .xlsx, .ods, .doc, .docx` | 415 |
-| 权限不足 | `错误: 无权限访问文件 '{file_path}'。请检查文件权限。` | 403 |
-| 文件损坏 | `错误: 文件 '{file_path}' 可能已损坏或格式无效,无法解析。` | 422 |
-| 密码保护 | `错误: 文件 '{file_path}' 受密码保护,暂不支持加密文档。` | 422 |
-| 页码无效 | `错误: 页码范围 '{page_range}' 无效。正确格式: '1-5' 或 '1,3,5'` | 400 |
-| 工作表不存在 | `错误: 工作表 '{sheet_name}' 不存在。可用工作表: {available_sheets}` | 404 |
+| 错误类型     | 错误消息模板                                                                          | HTTP状态码等效 |
+| ------------ | ------------------------------------------------------------------------------------- | -------------- |
+| 文件不存在   | `错误: 文件未找到 '{file_path}'。请检查路径是否正确。`                              | 404            |
+| 文件过大     | `错误: 文件大小 {size}MB 超过限制 50MB。请使用较小的文件。`                         | 413            |
+| 格式不支持   | `错误: 不支持的文件格式 '.{ext}'。支持的格式: .pdf, .xls, .xlsx, .ods, .doc, .docx` | 415            |
+| 权限不足     | `错误: 无权限访问文件 '{file_path}'。请检查文件权限。`                              | 403            |
+| 文件损坏     | `错误: 文件 '{file_path}' 可能已损坏或格式无效,无法解析。`                          | 422            |
+| 密码保护     | `错误: 文件 '{file_path}' 受密码保护,暂不支持加密文档。`                            | 422            |
+| 页码无效     | `错误: 页码范围 '{page_range}' 无效。正确格式: '1-5' 或 '1,3,5'`                    | 400            |
+| 工作表不存在 | `错误: 工作表 '{sheet_name}' 不存在。可用工作表: {available_sheets}`                | 404            |
 
 ### 错误处理策略
+
 1. **输入验证**: Pydantic自动验证参数类型和约束
 2. **文件验证**: 在处理前检查文件存在性、大小、权限
 3. **异常捕获**: 捕获所有处理异常,返回友好错误消息
@@ -630,6 +658,7 @@ format = "csv"     # 100 > 50
 ## 📦 依赖管理
 
 ### pyproject.toml (UV配置)
+
 ```toml
 [project]
 name = "document-reader-mcp"
@@ -666,6 +695,7 @@ dev-dependencies = [
 ```
 
 ### requirements.txt (备用)
+
 ```txt
 mcp>=1.0.0
 pydantic>=2.0.0
@@ -681,12 +711,14 @@ python-docx>=1.1.0
 ## 🚀 开发流程
 
 ### 阶段1: 项目初始化
-- [x] 创建项目目录结构
+
+- [X] 创建项目目录结构
 - [ ] 配置UV虚拟环境
 - [ ] 安装依赖包
 - [ ] 创建基础文件框架
 
 ### 阶段2: 核心框架实现
+
 - [ ] 实现Pydantic数据模型 (`models.py`)
 - [ ] 实现文档处理器基类 (`processors/base.py`)
 - [ ] 实现文档路由器 (`router.py`)
@@ -694,17 +726,20 @@ python-docx>=1.1.0
 - [ ] 实现工具函数 (`utils.py`)
 
 ### 阶段3: 处理器实现
+
 - [ ] 实现PDF处理器 (`processors/pdf.py`)
 - [ ] 实现Excel处理器 (`processors/excel.py`)
 - [ ] 实现Word处理器 (`processors/word.py`)
 
 ### 阶段4: 服务器集成
+
 - [ ] 实现FastMCP服务器 (`server.py`)
-- [ ] 注册`read_document`工具
+- [ ] 注册 `read_document`工具
 - [ ] 集成所有组件
 - [ ] 实现错误处理
 
 ### 阶段5: 测试和优化
+
 - [ ] 创建测试文档样本
 - [ ] 编写单元测试
 - [ ] 使用MCP Inspector测试
@@ -716,7 +751,9 @@ python-docx>=1.1.0
 ## 🧪 测试计划
 
 ### 测试文档准备
+
 创建以下测试文档:
+
 - `test.pdf` - 包含文本和表格的PDF
 - `test_small.xlsx` - 小表格Excel(≤50行,测试Markdown输出)
 - `test_large.xlsx` - 大表格Excel(>50行,测试CSV输出)
@@ -733,13 +770,15 @@ python-docx>=1.1.0
 ### 测试用例
 
 #### 功能测试
+
 1. **PDF读取**
+
    - 读取全部页面
    - 读取指定页码范围
    - 提取表格
    - 读取元数据
-
 2. **Excel读取**
+
    - 读取默认工作表
    - 读取指定工作表(按名称)
    - 读取指定工作表(按索引)
@@ -748,13 +787,14 @@ python-docx>=1.1.0
    - 预览模式测试(前10行)
    - 自定义行数限制测试
    - 图片替换为[image]测试
-
 3. **Word读取**
+
    - 读取段落文本
    - 读取表格
    - 读取图片信息
 
 #### 错误处理测试
+
 - 文件不存在
 - 文件过大
 - 不支持的格式
@@ -763,6 +803,7 @@ python-docx>=1.1.0
 - 密码保护
 
 #### 格式测试
+
 - Markdown输出格式
 - JSON输出格式
 - 元数据包含/排除
@@ -774,6 +815,7 @@ python-docx>=1.1.0
 ### 基本用法
 
 #### 读取PDF文档
+
 ```json
 {
   "file_path": "D:/documents/report.pdf",
@@ -782,6 +824,7 @@ python-docx>=1.1.0
 ```
 
 #### 读取PDF特定页面
+
 ```json
 {
   "file_path": "D:/documents/report.pdf",
@@ -792,6 +835,7 @@ python-docx>=1.1.0
 ```
 
 #### 读取Excel工作表(小表格,自动转Markdown)
+
 ```json
 {
   "file_path": "D:/data/sales.xlsx",
@@ -801,6 +845,7 @@ python-docx>=1.1.0
 ```
 
 #### 读取Excel大表格(自动转CSV)
+
 ```json
 {
   "file_path": "D:/data/large_report.xlsx",
@@ -810,6 +855,7 @@ python-docx>=1.1.0
 ```
 
 #### Excel预览模式(仅读取前10行)
+
 ```json
 {
   "file_path": "D:/data/huge_data.xlsx",
@@ -819,6 +865,7 @@ python-docx>=1.1.0
 ```
 
 #### Excel自定义行数限制
+
 ```json
 {
   "file_path": "D:/data/data.xlsx",
@@ -828,6 +875,7 @@ python-docx>=1.1.0
 ```
 
 #### 读取Word文档
+
 ```json
 {
   "file_path": "D:/documents/proposal.docx",
@@ -841,6 +889,7 @@ python-docx>=1.1.0
 ## 🔄 MCP配置
 
 ### Claude Desktop配置
+
 在 `claude_desktop_config.json` 中添加:
 
 ```json
@@ -861,6 +910,7 @@ python-docx>=1.1.0
 ```
 
 ### 验证安装
+
 ```bash
 # 使用MCP Inspector测试
 npx @modelcontextprotocol/inspector uv --directory D:/MCP/Document-Reader run python src/server.py
@@ -871,22 +921,26 @@ npx @modelcontextprotocol/inspector uv --directory D:/MCP/Document-Reader run py
 ## 📝 开发规范
 
 ### 代码风格
+
 - 使用Type Hints标注所有函数参数和返回值
 - 使用Pydantic进行数据验证,避免手动验证
-- 所有异步操作使用`async/await`
+- 所有异步操作使用 `async/await`
 - 遵循PEP 8代码规范
 
 ### 文档字符串
+
 - 所有公共函数必须有docstring
 - 使用Google风格的docstring
 - 包含参数说明、返回值说明、异常说明
 
 ### 错误处理
+
 - 使用具体的异常类型
 - 提供清晰的错误消息
 - 记录详细的错误日志
 
 ### 代码复用
+
 - 提取共享功能到工具函数
 - 避免代码重复
 - 使用继承和组合模式
@@ -896,16 +950,19 @@ npx @modelcontextprotocol/inspector uv --directory D:/MCP/Document-Reader run py
 ## 🎯 性能优化
 
 ### 内存优化
+
 - 大文件分块读取
 - 及时释放文件句柄
 - 限制Excel读取行数
 
 ### 速度优化
+
 - 使用异步I/O
 - 缓存文件元数据
 - 延迟加载大型对象
 
 ### 响应优化
+
 - Markdown格式优先(更紧凑)
 - 表格数据截断显示
 - 元数据可选包含
@@ -915,16 +972,19 @@ npx @modelcontextprotocol/inspector uv --directory D:/MCP/Document-Reader run py
 ## 📚 参考资源
 
 ### MCP相关
+
 - [MCP官方文档](https://modelcontextprotocol.io/)
 - [FastMCP文档](https://github.com/modelcontextprotocol/python-sdk)
 - [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
 
 ### 文档处理库
+
 - [pdfplumber文档](https://github.com/jsvine/pdfplumber)
 - [openpyxl文档](https://openpyxl.readthedocs.io/)
 - [python-docx文档](https://python-docx.readthedocs.io/)
 
 ### Python开发
+
 - [Pydantic文档](https://docs.pydantic.dev/)
 - [UV文档](https://github.com/astral-sh/uv)
 - [Python异步编程](https://docs.python.org/3/library/asyncio.html)
@@ -934,22 +994,26 @@ npx @modelcontextprotocol/inspector uv --directory D:/MCP/Document-Reader run py
 ## 📅 版本规划
 
 ### v0.1.0 (MVP)
-- [x] 项目初始化
+
+- [X] 项目初始化
 - [ ] 基础框架实现
 - [ ] PDF/Excel/Word基本读取
 - [ ] Markdown输出格式
 
 ### v0.2.0
+
 - [ ] JSON输出格式
 - [ ] 完整错误处理
 - [ ] 单元测试覆盖
 
 ### v0.3.0
+
 - [ ] 性能优化
 - [ ] 高级功能(图片提取等)
 - [ ] 完整文档
 
 ### v1.0.0
+
 - [ ] 生产就绪
 - [ ] 完整测试覆盖
 - [ ] 性能基准测试
@@ -959,6 +1023,7 @@ npx @modelcontextprotocol/inspector uv --directory D:/MCP/Document-Reader run py
 ## 🤝 贡献指南
 
 ### 开发环境设置
+
 ```bash
 # 克隆项目
 cd D:/MCP/Document-Reader
@@ -977,6 +1042,7 @@ pytest tests/
 ```
 
 ### 提交规范
+
 - feat: 新功能
 - fix: 错误修复
 - docs: 文档更新
