@@ -13,6 +13,9 @@ Document Reader MCP Server
 - **智能路由**: 根据文件扩展名自动选择最佳处理器
 - **多格式支持**: PDF、XLS、XLSX、ODS、DOC、DOCX
 - **灵活输出**: 支持Markdown和JSON两种输出格式
+- **Excel智能转换**: 小表格转Markdown,大表格转CSV格式
+- **预览模式**: 支持仅读取前N行快速预览Excel结构
+- **图片占位**: 无法处理的图片统一使用[image]标记
 - **安全限制**: 文件大小限制(50MB),仅支持本地文件
 - **错误友好**: 清晰的错误提示信息
 
@@ -114,7 +117,8 @@ class ReadDocumentInput(BaseModel):
     # Excel专用参数
     sheet_name: Optional[str] = None            # 工作表名称
     sheet_index: Optional[int] = None           # 工作表索引
-    max_rows: Optional[int] = 1000              # 最大行数限制
+    max_rows: Optional[int] = None              # 最大读取行数(None=全部,用于预览)
+    preview_mode: bool = False                  # 预览模式:仅读取前10行了解结构
 
     # Word专用参数
     include_images_info: bool = False           # 是否包含图片信息
@@ -178,6 +182,69 @@ class ReadDocumentInput(BaseModel):
 }
 ```
 
+**Excel小表格输出示例** (≤50行,Markdown格式):
+```markdown
+# Excel文档: sales.xlsx
+
+## 元数据
+- 工作表: Q1 Sales
+- 总行数: 25
+- 总列数: 5
+- 文件大小: 45 KB
+
+## 内容
+
+| 日期 | 产品 | 数量 | 单价 | 总额 |
+|------|------|------|------|------|
+| 2024-01-01 | 产品A | 10 | 99.99 | 999.90 |
+| 2024-01-02 | 产品B | 5 | 149.99 | 749.95 |
+| ... | ... | ... | ... | ... |
+```
+
+**Excel大表格输出示例** (>50行,CSV格式):
+```markdown
+# Excel文档: large_data.xlsx
+
+## 元数据
+- 工作表: Annual Report
+- 总行数: 1500
+- 总列数: 8
+- 文件大小: 2.3 MB
+- 格式: CSV (行数超过50行)
+
+## 内容 (CSV格式)
+
+```csv
+日期,产品,类别,数量,单价,折扣,税额,总额
+2024-01-01,产品A,电子,10,99.99,0.1,8.99,908.91
+2024-01-01,产品B,家居,5,149.99,0.05,7.12,719.07
+...
+```
+```
+
+**Excel预览模式输出示例** (preview_mode=true):
+```markdown
+# Excel文档: huge_data.xlsx (预览模式)
+
+## 元数据
+- 工作表: Data
+- 总行数: 50000
+- 总列数: 20
+- 文件大小: 15 MB
+- **预览模式**: 仅显示前10行
+
+## 内容预览
+
+| ID | 姓名 | 部门 | 职位 | 薪资 | ... |
+|----|------|------|------|------|-----|
+| 1 | 张三 | 技术部 | 工程师 | 15000 | ... |
+| 2 | 李四 | 市场部 | 经理 | 20000 | ... |
+| ... | ... | ... | ... | ... | ... |
+| 10 | 王十 | 财务部 | 会计 | 12000 | ... |
+
+**提示**: 这是预览模式,仅显示前10行。总共有50000行数据。
+```
+
 ---
 
 ### 2. 文档处理器架构
@@ -200,7 +267,8 @@ class DocumentProcessor(ABC):
                 "file_name": str,
                 "file_type": str,
                 "metadata": dict,
-                "content": list
+                "content": list,
+                "format_hint": str  # "markdown_table", "csv", "text"
             }
         """
         pass
@@ -212,6 +280,60 @@ class DocumentProcessor(ABC):
 
     def _validate_file(self, file_path: str) -> None:
         """验证文件存在性和可读性"""
+        pass
+```
+
+#### Excel处理器: ExcelProcessor
+```python
+class ExcelProcessor(DocumentProcessor):
+    """Excel文档处理器 - 支持XLS/XLSX/ODS
+
+    智能格式转换策略:
+    - 行数 ≤ 50: 转换为Markdown表格(易读)
+    - 行数 > 50: 转换为CSV格式(紧凑)
+    - 预览模式: 仅读取前10行
+    """
+
+    # 格式转换阈值
+    MARKDOWN_MAX_ROWS = 50  # 超过此行数使用CSV格式
+    PREVIEW_ROWS = 10       # 预览模式读取行数
+
+    def supports_extension(self, ext: str) -> bool:
+        return ext.lower() in ['.xls', '.xlsx', '.ods']
+
+    async def process(self, params: ReadDocumentInput) -> Dict[str, Any]:
+        """
+        处理Excel文档
+        - 读取指定工作表
+        - 智能选择输出格式(Markdown/CSV)
+        - 支持预览模式(前10行)
+        - 支持自定义行数限制
+        - 图片替换为[image]标记
+        """
+        pass
+
+    def _should_use_csv(self, row_count: int) -> bool:
+        """判断是否应该使用CSV格式"""
+        return row_count > self.MARKDOWN_MAX_ROWS
+```
+
+#### Word处理器: WordProcessor
+```python
+class WordProcessor(DocumentProcessor):
+    """Word文档处理器 - 支持DOC/DOCX"""
+
+    def supports_extension(self, ext: str) -> bool:
+        return ext.lower() in ['.doc', '.docx']
+
+    async def process(self, params: ReadDocumentInput) -> Dict[str, Any]:
+        """
+        处理Word文档
+        - 提取段落文本
+        - 识别表格
+        - 图片替换为[image]标记
+        - 提取图片信息(可选,仅元数据)
+        - 保留基本样式信息
+        """
         pass
 ```
 
@@ -228,46 +350,9 @@ class PdfProcessor(DocumentProcessor):
         处理PDF文档
         - 提取文本内容
         - 识别并提取表格
+        - 图片替换为[image]标记
         - 读取元数据
         - 支持页码范围过滤
-        """
-        pass
-```
-
-#### Excel处理器: ExcelProcessor
-```python
-class ExcelProcessor(DocumentProcessor):
-    """Excel文档处理器 - 支持XLS/XLSX/ODS"""
-
-    def supports_extension(self, ext: str) -> bool:
-        return ext.lower() in ['.xls', '.xlsx', '.ods']
-
-    async def process(self, params: ReadDocumentInput) -> Dict[str, Any]:
-        """
-        处理Excel文档
-        - 读取指定工作表
-        - 提取表格数据
-        - 处理公式和格式
-        - 支持行数限制
-        """
-        pass
-```
-
-#### Word处理器: WordProcessor
-```python
-class WordProcessor(DocumentProcessor):
-    """Word文档处理器 - 支持DOC/DOCX"""
-
-    def supports_extension(self, ext: str) -> bool:
-        return ext.lower() in ['.doc', '.docx']
-
-    async def process(self, params: ReadDocumentInput) -> Dict[str, Any]:
-        """
-        处理Word文档
-        - 提取段落文本
-        - 识别表格
-        - 提取图片信息(可选)
-        - 保留基本样式信息
         """
         pass
 ```
@@ -360,6 +445,20 @@ def parse_page_range(page_range: str, total_pages: int) -> List[int]:
     """
     pass
 
+# Excel格式转换
+def convert_to_csv(data: List[List[Any]]) -> str:
+    """将表格数据转换为CSV格式字符串"""
+    pass
+
+def should_use_csv_format(row_count: int, threshold: int = 50) -> bool:
+    """判断是否应该使用CSV格式"""
+    return row_count > threshold
+
+# 图片处理
+def replace_images_with_placeholder(content: str) -> str:
+    """将内容中的图片替换为[image]标记"""
+    pass
+
 # 错误处理
 def handle_file_error(e: Exception, file_path: str) -> str:
     """统一的文件错误处理"""
@@ -370,6 +469,111 @@ def format_file_size(size_bytes: int) -> str:
     """将字节数转换为人类可读格式"""
     pass
 ```
+
+---
+
+### 6. Excel智能格式转换详解
+
+#### 转换决策流程
+```python
+def determine_excel_output_format(row_count: int, preview_mode: bool, max_rows: Optional[int]) -> str:
+    """
+    决定Excel输出格式
+
+    优先级:
+    1. 预览模式 -> 读取前10行,Markdown表格
+    2. 自定义max_rows -> 读取指定行数,根据行数选择格式
+    3. 全部读取 -> 根据实际行数选择格式
+
+    格式选择:
+    - 行数 ≤ 50: Markdown表格
+    - 行数 > 50: CSV格式
+    """
+    if preview_mode:
+        return "markdown_table"  # 预览模式固定用Markdown
+
+    actual_rows = min(row_count, max_rows) if max_rows else row_count
+
+    if actual_rows <= 50:
+        return "markdown_table"
+    else:
+        return "csv"
+```
+
+#### 格式转换示例
+
+**场景1: 小表格(25行)**
+```python
+# 输入
+params = {
+    "file_path": "sales.xlsx",
+    "sheet_name": "Q1"
+}
+
+# 处理逻辑
+total_rows = 25  # 实际行数
+format = "markdown_table"  # 25 ≤ 50
+
+# 输出: Markdown表格
+```
+
+**场景2: 大表格(500行)**
+```python
+# 输入
+params = {
+    "file_path": "annual_report.xlsx"
+}
+
+# 处理逻辑
+total_rows = 500  # 实际行数
+format = "csv"  # 500 > 50
+
+# 输出: CSV格式
+```
+
+**场景3: 预览模式(实际5000行)**
+```python
+# 输入
+params = {
+    "file_path": "huge_data.xlsx",
+    "preview_mode": True
+}
+
+# 处理逻辑
+total_rows = 5000  # 实际行数
+read_rows = 10     # 预览模式固定读取10行
+format = "markdown_table"  # 预览模式固定Markdown
+
+# 输出: Markdown表格(10行) + 提示信息
+```
+
+**场景4: 自定义限制(实际1000行,限制100行)**
+```python
+# 输入
+params = {
+    "file_path": "data.xlsx",
+    "max_rows": 100
+}
+
+# 处理逻辑
+total_rows = 1000  # 实际行数
+read_rows = 100    # 限制读取100行
+format = "csv"     # 100 > 50
+
+# 输出: CSV格式(100行)
+```
+
+#### 图片处理策略
+
+**所有文档格式统一处理**:
+1. PDF中的图片 -> `[image]`
+2. Word中的图片 -> `[image]`
+3. Excel中的图片 -> `[image]`
+
+**实现方式**:
+- 检测到图片对象时,不尝试提取或编码
+- 在文本流中插入`[image]`标记
+- 可选:在元数据中记录图片数量和位置
 
 ---
 
@@ -385,10 +589,18 @@ def format_file_size(size_bytes: int) -> str:
 - **不支持网络URL**: 仅本地文件访问
 - **不限制路径范围**: 用户自行管理文件权限
 
-### Excel行数限制
-- **默认最大行数**: 1000行
-- **可配置范围**: 1-10000行
-- **原因**: 防止大表格导致响应过长
+### Excel处理策略
+- **智能格式转换**:
+  - 行数 ≤ 50: 转换为Markdown表格(易读,适合LLM理解)
+  - 行数 > 50: 转换为CSV格式(紧凑,节省token)
+- **预览模式**:
+  - 启用时仅读取前10行
+  - 用于快速了解Excel结构和列名
+- **行数限制**:
+  - 无默认限制(可读取全部数据)
+  - 支持自定义max_rows参数
+  - 建议大文件使用预览模式
+- **图片处理**: 所有图片替换为[image]标记
 
 ---
 
@@ -506,10 +718,14 @@ python-docx>=1.1.0
 ### 测试文档准备
 创建以下测试文档:
 - `test.pdf` - 包含文本和表格的PDF
-- `test.xlsx` - 多工作表Excel文件
+- `test_small.xlsx` - 小表格Excel(≤50行,测试Markdown输出)
+- `test_large.xlsx` - 大表格Excel(>50行,测试CSV输出)
+- `test_huge.xlsx` - 超大Excel(>1000行,测试预览模式)
 - `test.xls` - 旧版Excel文件
 - `test.ods` - OpenDocument表格
+- `test_with_images.xlsx` - 包含图片的Excel(测试[image]替换)
 - `test.docx` - 包含段落和表格的Word文档
+- `test_with_images.docx` - 包含图片的Word文档
 - `test.doc` - 旧版Word文档
 - `large.pdf` - 超过50MB的大文件(测试限制)
 - `encrypted.pdf` - 加密PDF(测试错误处理)
@@ -527,7 +743,11 @@ python-docx>=1.1.0
    - 读取默认工作表
    - 读取指定工作表(按名称)
    - 读取指定工作表(按索引)
-   - 行数限制测试
+   - 小表格Markdown格式测试(≤50行)
+   - 大表格CSV格式测试(>50行)
+   - 预览模式测试(前10行)
+   - 自定义行数限制测试
+   - 图片替换为[image]测试
 
 3. **Word读取**
    - 读取段落文本
@@ -571,12 +791,38 @@ python-docx>=1.1.0
 }
 ```
 
-#### 读取Excel工作表
+#### 读取Excel工作表(小表格,自动转Markdown)
 ```json
 {
   "file_path": "D:/data/sales.xlsx",
   "sheet_name": "Q1 Sales",
-  "max_rows": 500,
+  "response_format": "markdown"
+}
+```
+
+#### 读取Excel大表格(自动转CSV)
+```json
+{
+  "file_path": "D:/data/large_report.xlsx",
+  "sheet_index": 0,
+  "response_format": "markdown"
+}
+```
+
+#### Excel预览模式(仅读取前10行)
+```json
+{
+  "file_path": "D:/data/huge_data.xlsx",
+  "preview_mode": true,
+  "response_format": "markdown"
+}
+```
+
+#### Excel自定义行数限制
+```json
+{
+  "file_path": "D:/data/data.xlsx",
+  "max_rows": 100,
   "response_format": "markdown"
 }
 ```
