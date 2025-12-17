@@ -309,18 +309,81 @@ class WordProcessor(DocumentProcessor):
             if meta and meta.codepage:
                 # 常见代码页映射
                 codepage_map = {
-                    936: 'gbk',      # 简体中文
-                    950: 'big5',     # 繁体中文
-                    932: 'shift_jis', # 日文
-                    949: 'euc-kr',   # 韩文
-                    1252: 'cp1252',  # 西欧
-                    1251: 'cp1251',  # 俄文
-                    65001: 'utf-8',  # UTF-8
+                    # 东亚
+                    936: 'gbk',        # 简体中文
+                    950: 'big5',       # 繁体中文
+                    932: 'shift_jis',  # 日文
+                    949: 'euc-kr',     # 韩文
+                    # 西欧/中欧
+                    1250: 'cp1250',    # 中欧
+                    1251: 'cp1251',    # 俄文
+                    1252: 'cp1252',    # 西欧
+                    1253: 'cp1253',    # 希腊文
+                    1254: 'cp1254',    # 土耳其文
+                    1255: 'cp1255',    # 希伯来文
+                    1256: 'cp1256',    # 阿拉伯文
+                    1257: 'cp1257',    # 波罗的海文
+                    1258: 'cp1258',    # 越南文
+                    874: 'cp874',      # 泰文
+                    # Unicode
+                    65001: 'utf-8',
+                    1200: 'utf-16-le',
+                    1201: 'utf-16-be',
                 }
                 return codepage_map.get(meta.codepage, f'cp{meta.codepage}')
         except Exception:
             pass
         return 'gbk'  # 默认使用 GBK（中文 Windows 常用）
+
+    def _detect_encoding(self, data: bytes) -> Optional[str]:
+        """使用 chardet 自动检测文本编码
+
+        Args:
+            data: 要检测编码的二进制数据
+
+        Returns:
+            检测到的编码名称，如果检测失败或置信度低则返回 None
+        """
+        try:
+            import chardet
+            result = chardet.detect(data)
+            if result and result.get('confidence', 0) > 0.7:
+                encoding = result.get('encoding')
+                if encoding:
+                    # 标准化编码名称
+                    encoding = encoding.lower().replace('-', '_')
+                    return encoding
+        except ImportError:
+            # chardet 未安装，跳过自动检测
+            pass
+        except Exception:
+            # 检测失败，跳过
+            pass
+        return None
+
+    def _evaluate_decode_quality(self, text: str) -> float:
+        """评估解码质量，返回 0-1 的分数
+
+        Args:
+            text: 解码后的文本
+
+        Returns:
+            质量分数，0-1 之间，越高表示质量越好
+        """
+        if not text:
+            return 0.0
+
+        total = len(text)
+        # 有意义字符：字母、数字、中文
+        meaningful = sum(1 for c in text if c.isalnum() or '\u4e00' <= c <= '\u9fff')
+        # 替换字符（解码失败的标志）
+        replacement = text.count('\ufffd')
+        # 控制字符（可能是乱码）
+        control = sum(1 for c in text if ord(c) < 32 and c not in '\n\r\t')
+
+        # 计算分数
+        score = (meaningful / total) - (replacement / total * 2) - (control / total)
+        return max(0.0, min(1.0, score))
 
     def _extract_doc_text_from_ole(self, ole: Any, codepage: str = 'gbk') -> str:
         """从 OLE 文件提取文本内容
@@ -465,46 +528,67 @@ class WordProcessor(DocumentProcessor):
         return '\n\n'.join(text_parts)
 
     def _fallback_extract_text_from_data(self, data: bytes, codepage: str = 'gbk') -> str:
-        """从二进制数据提取可读文本（改进版）"""
+        """从二进制数据提取可读文本（优化版）
+
+        优化后的编码尝试顺序：
+        1. 使用元数据指定的 codepage 编码
+        2. 使用 chardet 检测的编码
+        3. 尝试 UTF-16LE（DOC 常用）
+        4. 尝试其他常见编码
+        5. 默认回退到 GBK 或 UTF-8
+        """
         results = []
 
-        # 方法1: 使用指定的代码页解码
+        # 方法1: 使用元数据指定的代码页解码
         try:
             text = data.decode(codepage, errors='ignore')
             cleaned = self._clean_doc_text(text)
             if cleaned:
-                results.append((codepage, cleaned, len(cleaned)))
+                quality = self._evaluate_decode_quality(cleaned)
+                results.append((codepage, cleaned, quality))
         except Exception:
             pass
 
-        # 方法2: 尝试 UTF-16LE 解码
+        # 方法2: 使用 chardet 自动检测编码
+        detected_encoding = self._detect_encoding(data)
+        if detected_encoding and detected_encoding != codepage:
+            try:
+                text = data.decode(detected_encoding, errors='ignore')
+                cleaned = self._clean_doc_text(text)
+                if cleaned:
+                    quality = self._evaluate_decode_quality(cleaned)
+                    results.append((detected_encoding, cleaned, quality))
+            except Exception:
+                pass
+
+        # 方法3: 尝试 UTF-16LE 解码
         try:
             text = self._extract_utf16le_text(data)
             if text:
-                results.append(('utf16', text, len(text)))
+                quality = self._evaluate_decode_quality(text)
+                results.append(('utf16le', text, quality))
         except Exception:
             pass
 
-        # 方法3: 尝试其他常见编码
-        for enc in ['utf-8', 'cp1252']:
-            if enc == codepage:
+        # 方法4: 尝试其他常见编码
+        fallback_encodings = ['utf-8', 'gbk', 'cp1252']
+        for enc in fallback_encodings:
+            if enc == codepage or enc == detected_encoding:
                 continue
             try:
                 text = data.decode(enc, errors='ignore')
                 cleaned = self._clean_doc_text(text)
                 if cleaned:
-                    results.append((enc, cleaned, len(cleaned)))
+                    quality = self._evaluate_decode_quality(cleaned)
+                    results.append((enc, cleaned, quality))
             except Exception:
                 pass
 
-        # 选择最好的结果（包含最多中文字符或最长有意义文本）
+        # 选择质量最好的结果
         if results:
-            # 优先选择包含中文的结果
-            chinese_results = [(enc, txt, length) for enc, txt, length in results
-                               if any('\u4e00' <= c <= '\u9fff' for c in txt)]
-            if chinese_results:
-                return max(chinese_results, key=lambda x: x[2])[1]
-            return max(results, key=lambda x: x[2])[1]
+            # 按质量分数排序，选择最高分
+            best_result = max(results, key=lambda x: x[2])
+            return best_result[1]
 
         return ''
 
@@ -601,16 +685,32 @@ class WordProcessor(DocumentProcessor):
     def _find_libreoffice(self) -> Optional[str]:
         """查找 LibreOffice 可执行文件路径"""
         import shutil
+        import glob
 
         # Windows 常见路径
         if sys.platform == 'win32':
             possible_paths = [
                 r'C:\Program Files\LibreOffice\program\soffice.exe',
                 r'C:\Program Files (x86)\LibreOffice\program\soffice.exe',
+                r'D:\Program Files\LibreOffice\program\soffice.exe',
+                r'D:\LibreOffice\program\soffice.exe',
             ]
             for path in possible_paths:
                 if os.path.exists(path):
                     return path
+
+            # 搜索所有盘符下的 LibreOffice
+            for drive in ['C', 'D', 'E', 'F']:
+                patterns = [
+                    f'{drive}:\\LibreOffice\\program\\soffice.exe',
+                    f'{drive}:\\Program Files\\LibreOffice*\\program\\soffice.exe',
+                    f'{drive}:\\Program Files (x86)\\LibreOffice*\\program\\soffice.exe',
+                ]
+                for pattern in patterns:
+                    matches = glob.glob(pattern)
+                    if matches:
+                        return matches[0]
+
             # 尝试从 PATH 查找
             return shutil.which('soffice')
 

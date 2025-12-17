@@ -10,6 +10,8 @@
 - **灵活输出**: 支持 Markdown 和 JSON 两种输出格式
 - **Excel 智能转换**: 小表格转 Markdown，大表格转 CSV 格式
 - **预览模式**: 支持仅读取前 N 行快速预览 Excel 结构
+- **DOC 多方案处理**: 支持 LibreOffice、Word COM、WPS COM、olefile 多种方式
+- **智能编码检测**: 自动检测文档编码，减少乱码问题
 - **图片占位**: 无法处理的图片统一使用 `[image]` 标记
 - **安全限制**: 文件大小限制 (50MB)，仅支持本地文件
 - **错误友好**: 清晰的中文错误提示信息
@@ -252,14 +254,29 @@ uv run pytest tests/
 - **xlrd**: Excel 97-2003 格式 (.xls)
 - **odfpy**: OpenDocument 表格 (.ods)
 - **python-docx**: Word 2007+ 格式 (.docx)
+- **olefile**: DOC 文件 OLE 结构解析
+- **chardet**: 文本编码自动检测
+
+## DOC 文件处理
+
+DOC 格式（Word 97-2003）支持多种处理方式，按优先级自动选择：
+
+| 优先级 | 方法 | 说明 | 要求 |
+|--------|------|------|------|
+| 1 | LibreOffice | 转换为 DOCX 后读取，效果最佳 | 安装 LibreOffice |
+| 2 | Microsoft Word COM | 通过 COM 接口直接读取 | Windows + Microsoft Office |
+| 3 | WPS Office COM | 通过 COM 接口直接读取 | Windows + WPS Office |
+| 4 | olefile 纯 Python | 直接解析 OLE 结构 | 无（内置） |
+
+**推荐**: 安装 [LibreOffice](https://www.libreoffice.org/) 以获得最佳的 DOC 文件读取效果。
 
 ## 限制
 
 - 最大文件大小: 50MB
 - 仅支持本地文件路径
-- DOC 格式需要安装 antiword
 - 不支持加密/密码保护的文档
 - 图片内容无法提取，使用 `[image]` 占位
+- DOC 文件使用 olefile 纯 Python 方案时可能出现乱码，建议安装 LibreOffice
 
 ## 许可证
 
