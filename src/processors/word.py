@@ -203,20 +203,35 @@ class WordProcessor(DocumentProcessor):
     async def _process_doc(self, params: ReadDocumentInput) -> DocumentResult:
         """处理 DOC 文件
 
-        尝试多种方法:
-        1. Windows COM 接口 (需要 Microsoft Word/WPS) - 最佳效果
-        2. olefile 纯 Python 解析 (备选方案) - 可能有乱码
+        尝试多种方法（按优先级）:
+        1. LibreOffice 转换为 DOCX（推荐，跨平台）
+        2. Microsoft Word COM（Windows + Office）
+        3. WPS Office COM（Windows + WPS）
+        4. olefile 纯 Python（备选，可能有乱码）
         """
         file_path = params.file_path
+        errors = []
 
-        # Windows 上优先尝试 COM 接口（效果最好）
+        # 1. 优先尝试 LibreOffice
+        try:
+            return await self._process_doc_with_libreoffice(params)
+        except Exception as e:
+            errors.append(f"LibreOffice: {e}")
+
+        # 2. Windows 上尝试 Microsoft Word COM
         if sys.platform == 'win32':
             try:
                 return await self._process_doc_with_com(params)
-            except Exception:
-                pass
+            except Exception as e:
+                errors.append(f"Microsoft Word: {e}")
 
-        # 备选方案：使用 olefile 纯 Python 解析
+            # 3. 尝试 WPS COM
+            try:
+                return await self._process_doc_with_wps(params)
+            except Exception as e:
+                errors.append(f"WPS: {e}")
+
+        # 4. 备选：olefile 纯 Python
         try:
             result = await self._process_doc_with_olefile(params)
             # 检查提取的文本质量
@@ -229,16 +244,15 @@ class WordProcessor(DocumentProcessor):
                     warning = (
                         "\n\n---\n"
                         "**注意**: DOC 文件解析可能不完整。"
-                        "建议安装 Microsoft Word 或将文件转换为 DOCX/PDF 格式以获得更好的效果。"
+                        "建议安装 LibreOffice/Microsoft Word/WPS 或将文件转换为 DOCX/PDF 格式以获得更好的效果。"
                     )
                     result.content[0].text = text + warning
             return result
-        except Exception:
-            pass
+        except Exception as e:
+            errors.append(f"olefile: {e}")
 
         raise ValueError(
-            f"错误: 无法处理 DOC 文件 '{file_path}'。"
-            f"请安装 Microsoft Word 或将文件转换为 DOCX 格式。"
+            f"无法处理 DOC 文件 '{file_path}'。尝试的方法: {'; '.join(errors)}"
         )
 
     async def _process_doc_with_olefile(self, params: ReadDocumentInput) -> DocumentResult:
@@ -583,6 +597,113 @@ class WordProcessor(DocumentProcessor):
             created_date=created_date,
             modified_date=modified_date,
         )
+
+    def _find_libreoffice(self) -> Optional[str]:
+        """查找 LibreOffice 可执行文件路径"""
+        import shutil
+
+        # Windows 常见路径
+        if sys.platform == 'win32':
+            possible_paths = [
+                r'C:\Program Files\LibreOffice\program\soffice.exe',
+                r'C:\Program Files (x86)\LibreOffice\program\soffice.exe',
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    return path
+            # 尝试从 PATH 查找
+            return shutil.which('soffice')
+
+        # Linux/Mac
+        return shutil.which('soffice') or shutil.which('libreoffice')
+
+    async def _process_doc_with_libreoffice(self, params: ReadDocumentInput) -> DocumentResult:
+        """使用 LibreOffice 将 DOC 转换为 DOCX 后读取"""
+        import subprocess
+        import tempfile
+
+        file_path = params.file_path
+
+        # 查找 LibreOffice 可执行文件
+        soffice_path = self._find_libreoffice()
+        if not soffice_path:
+            raise ValueError("未找到 LibreOffice")
+
+        # 创建临时目录
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # 使用 LibreOffice 转换
+            cmd = [
+                soffice_path,
+                '--headless',
+                '--convert-to', 'docx',
+                '--outdir', temp_dir,
+                file_path
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=60)
+
+            if result.returncode != 0:
+                raise ValueError(f"LibreOffice 转换失败: {result.stderr.decode('utf-8', errors='ignore')}")
+
+            # 读取转换后的 DOCX
+            docx_path = os.path.join(temp_dir, os.path.splitext(os.path.basename(file_path))[0] + '.docx')
+
+            if not os.path.exists(docx_path):
+                raise ValueError("LibreOffice 转换后未生成 DOCX 文件")
+
+            # 复用现有的 DOCX 处理逻辑
+            params_copy = params.model_copy()
+            params_copy.file_path = docx_path
+            return await self._process_docx(params_copy)
+
+    async def _process_doc_with_wps(self, params: ReadDocumentInput) -> DocumentResult:
+        """使用 WPS Office COM 接口处理 DOC 文件"""
+        file_path = params.file_path
+        abs_path = os.path.abspath(file_path)
+
+        try:
+            import win32com.client
+            import pythoncom
+
+            # 初始化 COM
+            pythoncom.CoInitialize()
+
+            try:
+                # WPS 的 COM 类名
+                wps = win32com.client.Dispatch("Kwps.Application")
+                wps.Visible = False
+
+                try:
+                    doc = wps.Documents.Open(abs_path, ReadOnly=True)
+
+                    try:
+                        # 复用 COM 内容提取方法
+                        metadata = self._extract_doc_com_metadata(doc, file_path)
+                        content = self._extract_doc_com_content(doc)
+
+                        return DocumentResult(
+                            file_name=os.path.basename(file_path),
+                            file_type="Word",
+                            metadata=metadata,
+                            content=content,
+                            format_hint="text"
+                        )
+
+                    finally:
+                        doc.Close(False)
+
+                finally:
+                    wps.Quit()
+
+            finally:
+                pythoncom.CoUninitialize()
+
+        except ImportError:
+            raise ValueError("缺少 pywin32 库")
+        except Exception as e:
+            error_str = str(e).lower()
+            if "kwps" in error_str or "dispatch" in error_str:
+                raise ValueError("无法启动 WPS Office，请确保已安装 WPS")
+            raise ValueError(f"WPS 处理 DOC 文件时发生错误: {str(e)}")
 
     async def _process_doc_with_com(self, params: ReadDocumentInput) -> DocumentResult:
         """使用 pywin32 COM 接口处理 DOC 文件
